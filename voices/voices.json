@@ -1,0 +1,9 @@
+{
+  "male, middle-aged, low pitch, studio quality, calm": {
+    "style": "male, middle-aged, low pitch, studio quality, calm",
+    "reference": "3908dd2866c872d18b5b8a4ef8f4e86a27db86634e55ec6a1e508b228da78649.wav",
+    "seed": 42,
+    "steps": 30,
+    "language": ""
+  }
+}
