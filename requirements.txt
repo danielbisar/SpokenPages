@@ -1,2 +1,4 @@
 voxcpm==2.0.3
 soundfile>=0.13,<1
+
+triton-windows>=3.8,<3.9; sys_platform == "win32"

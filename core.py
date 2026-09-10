@@ -6,6 +6,7 @@ import re
 import wave
 import zipfile
 from dataclasses import dataclass
+from functools import lru_cache
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote
@@ -25,13 +26,13 @@ class TextReader(HTMLParser):
         self.hidden = 0
 
     def handle_starttag(self, tag, attrs):
-        if tag in ('script', 'style'):
+        if tag in ('head', 'script', 'style'):
             self.hidden += 1
         if tag in ('p', 'div', 'br', 'li', 'h1', 'h2', 'h3', 'section'):
             self.parts.append('\n')
 
     def handle_endtag(self, tag):
-        if tag in ('script', 'style'):
+        if tag in ('head', 'script', 'style'):
             self.hidden = max(0, self.hidden - 1)
         if tag in ('p', 'div', 'li', 'h1', 'h2', 'h3', 'section'):
             self.parts.append('\n')
@@ -41,7 +42,7 @@ class TextReader(HTMLParser):
             self.parts.append(data)
 
 
-def read_epub(path):
+def read_epub(path, include_language=False):
     with zipfile.ZipFile(path) as archive:
         if sum(i.file_size for i in archive.infolist()) > 200_000_000:
             raise ValueError('EPUB is too large (200 MB expanded limit).')
@@ -67,10 +68,13 @@ def read_epub(path):
             lines = [re.sub(r'\s+', ' ', line).strip() for line in ''.join(reader.parts).splitlines()]
             lines = [line for line in lines if line]
             if lines:
-                chapters.append(Chapter(lines[0][:100], '\n\n'.join(lines)))
+                heading = ' — '.join(lines[:2]) if re.fullmatch(r'\d+|[IVXLCDM]+', lines[0]) and len(lines) > 1 else lines[0]
+                chapters.append(Chapter(heading[:100], '\n\n'.join(lines)))
         if not chapters:
             raise ValueError('No readable chapters found. Use an unencrypted EPUB.')
-        return book_title, chapters
+        language = root.find('.//{*}metadata/{*}language')
+        language = language.text.strip() if language is not None and language.text else ''
+        return (book_title, chapters, language) if include_language else (book_title, chapters)
 
 
 def split_text(text, limit=400):
@@ -116,12 +120,25 @@ def join_wavs(inputs, output, gap_seconds=0.25):
         temporary.unlink(missing_ok=True)
 
 
-def generate(chapters, destination, reference, style, stop, report, preview=False):
+def narration_prompt(text, style, language=''):
+    direction = ', '.join(part for part in (style.strip(), f'Speak in {language}' if language else '') if part)
+    return f'({direction}){text}' if direction else text
+
+
+@lru_cache(maxsize=1)
+def load_model():
+    """Keep weights and compiled kernels alive between sequential UI jobs."""
+    from voxcpm import VoxCPM
+    return VoxCPM.from_pretrained('openbmb/VoxCPM2', load_denoiser=False)
+
+
+def generate(chapters, destination, reference, style, stop, report, preview=False,
+             language='', steps=20, seed=42):
+    if not preview and not reference:
+        raise ValueError('Book generation needs a voice reference. Generate a voice test, use it as the reference, and save the voice first.')
     import soundfile as sf
     import torch
-    from voxcpm import VoxCPM
-
-    config = {'model': 'openbmb/VoxCPM2', 'style': style, 'seed': 42, 'steps': 10, 'cfg': 2.0,
+    config = {'model': 'openbmb/VoxCPM2', 'style': style, 'seed': seed, 'steps': steps, 'language': language, 'cfg': 2.0,
               'reference': hashlib.sha256(Path(reference).read_bytes()).hexdigest() if reference else None,
               'chapters': [(i, c.title, c.text) for i, c in chapters], 'preview': preview}
     key = hashlib.sha256(json.dumps(config, ensure_ascii=False).encode()).hexdigest()[:16]
@@ -129,7 +146,7 @@ def generate(chapters, destination, reference, style, stop, report, preview=Fals
     cache = folder / 'segments'
     cache.mkdir(parents=True, exist_ok=True)
     (folder / 'manifest.json').write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
-    report('Loading VoxCPM2. First use downloads model weights…', 0)
+    report('Preparing passages…', 0)
     model = None
     tasks = [(i, c, split_text(c.text)) for i, c in chapters]
     if preview:
@@ -152,13 +169,17 @@ def generate(chapters, destination, reference, style, stop, report, preview=Fals
                     pass
             if not valid:
                 if model is None:
-                    model = VoxCPM.from_pretrained('openbmb/VoxCPM2', load_denoiser=False)
+                    report('Loading / preparing VoxCPM2. First compilation can take several minutes…', done / total)
+                    model = load_model()
+                    if stop.is_set():
+                        report('Stopped after model preparation.', done / total)
+                        return folder
                 report(f'{chapter.title} • passage {segment_index + 1}/{len(parts)}', done / total)
-                kwargs = {'text': f'({style}){text}' if style else text,
-                          'cfg_value': 2.0, 'inference_timesteps': 10}
+                kwargs = {'text': narration_prompt(text, style, language),
+                          'cfg_value': 2.0, 'inference_timesteps': steps}
                 if reference:
                     kwargs['reference_wav_path'] = reference
-                torch.manual_seed(42)
+                torch.manual_seed(seed)
                 wav = model.generate(**kwargs)
                 if len(wav) == 0:
                     raise ValueError('VoxCPM returned empty audio. Try a shorter passage.')
