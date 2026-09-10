@@ -56,7 +56,7 @@ This setting applies only to that PowerShell process unless added to the user's 
 
 ## Generation fails or stops
 
-- **Out of memory:** close other GPU applications, close and reopen Audiobook to release cached model memory, and try a shorter selection. Selecting fewer chapters reduces output work but may not reduce model VRAM substantially.
+- **Out of memory:** close other GPU applications, close and reopen SpokenPages to release cached model memory, and try a shorter selection. Selecting fewer chapters reduces output work but may not reduce model VRAM substantially.
 - **Empty audio:** retry with a shorter or simpler passage, a different reference, or fewer expressive instructions.
 - **Missing reference:** reopen Voice setup, select an existing WAV or generate a test, choose **Use last test as voice reference**, and save the voice again.
 - **Stop appears delayed:** Stop is checked between passages and after model preparation; it cannot interrupt an active model call.

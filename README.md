@@ -1,4 +1,4 @@
-# Audiobook
+# SpokenPages - Local EPUB to Audiobook Converter
 
 Native Windows EPUB-to-audiobook prototype powered by OpenBMB VoxCPM2.
 

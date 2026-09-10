@@ -1,4 +1,4 @@
-"""Audiobook native Windows desktop interface."""
+"""SpokenPages native Windows desktop interface."""
 import os
 import queue
 import threading
@@ -21,7 +21,7 @@ class App:
         self.stop = threading.Event()
         self.busy = False
         self.last_preview = None
-        root.title('Audiobook — EPUB to Audiobook')
+        root.title('SpokenPages — EPUB to Audiobook')
         root.geometry('980x820')
         root.minsize(760, 600)
         style = ttk.Style()
@@ -43,7 +43,7 @@ class App:
         self.edit_voice = tk.StringVar()
         shell = ttk.Frame(root, padding=16)
         shell.pack(fill='both', expand=True)
-        ttk.Label(shell, text='Audiobook', font=('Georgia', 26)).pack(anchor='w')
+        ttk.Label(shell, text='SpokenPages', font=('Georgia', 26)).pack(anchor='w')
         self.tabs = ttk.Notebook(shell)
         self.tabs.pack(fill='both', expand=True, pady=8)
         book = self.make_tab('Book generation')
