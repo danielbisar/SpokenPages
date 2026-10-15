@@ -20,7 +20,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 Setup is safe to rerun. To rebuild from scratch, close the app, delete `.venv`, and rerun setup. This does not remove voices, model weights, or generated books.
 
-The setup intentionally installs `torch==2.14.0` with `torchaudio==2.11.0` from the CUDA 12.6 PyTorch index. Torchaudio 2.14 is not published there; the selected pair passes `pip check` and imports on the tested machine. Inspect an installation with:
+The setup intentionally installs `torch==2.14.0` with `torchaudio==2.11.0` from the CUDA 12.6 PyTorch index. The selected pair is recorded as passing `pip check` and imports on the development machine; do not normalize its version numbers. `constraints-windows.txt` also fixes the recorded VoxCPM/Triton versions. Setup now checks integrity/imports and records resolved versions in `.venv/installed-packages.txt`; a successful setup is not a GPU inference test. See the [environment record](environment.md). Inspect an installation with:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip check
@@ -54,13 +54,16 @@ $env:HF_HOME = 'D:\huggingface'
 
 This setting applies only to that PowerShell process unless added to the user's environment. `benchmark.py --model` deliberately uses cached files only, so run one successful generation before using that benchmark.
 
+Generation and benchmarking use the immutable model revision recorded in `core.py`. A cache containing a different revision is insufficient for `benchmark.py --model`; the required revision must already be present.
+
 ## Generation fails or stops
 
 - **Out of memory:** close other GPU applications, close and reopen SpokenPages to release cached model memory, and try a shorter selection. Selecting fewer chapters reduces output work but may not reduce model VRAM substantially.
 - **Empty audio:** retry with a shorter or simpler passage, a different reference, or fewer expressive instructions.
 - **Missing reference:** reopen Voice setup, select an existing WAV or generate a test, choose **Use last test as voice reference**, and save the voice again.
 - **Stop appears delayed:** Stop is checked between passages and after model preparation; it cannot interrupt an active model call.
-- **Unexpected resume:** resume identity includes chapter titles and full text, selected indices, voice settings, reference contents, language, steps, and seed. Matching jobs reuse valid passage WAVs.
+- **Unexpected resume:** resume identity includes chapter titles and full text, selected indices, voice settings, reference contents, language, steps, seed, cache compatibility version, and model revision. Compatibility changes create new jobs without migrating old output. Matching jobs reuse only complete readable PCM passage WAVs.
+- **Worker failure details:** launch `start.cmd` or `start.ps1` from a terminal to retain the worker traceback on standard error. The UI still shows a short error; review traceback paths/messages before sharing them.
 
 Completed segments remain in the job's `segments/` directory after an error or stop. Do not remove that directory if you intend to resume.
 
@@ -80,12 +83,15 @@ If labels or text look stale after updating the application, reopen the EPUB. Na
 
 Saved reference WAVs use a content-hash filename. Updating or deleting a voice does not automatically remove old unreferenced WAVs; remove one manually only after confirming no entry in `voices.json` names it.
 
+The tracked synthetic example now lives in `examples/voices/`; `voices/` is ignored user data. Existing user libraries remain in place. If no library exists, startup seeds it from the example. If the app reports a **Git LFS pointer**, install Git LFS, run `git lfs install` and `git lfs pull` in the clone, then restart. A pointer is not playable audio.
+
 ## Storage and cleanup
 
 - `.venv/`: installed Python environment; safe to delete and recreate with setup.
 - `%USERPROFILE%\.cache\huggingface\hub`: downloaded model data; safe to delete when the app is closed, but the next generation downloads it again.
 - `audiobooks/`: default output, previews, manifests, and resumable passage caches; delete completed job folders when neither their output nor resume data is needed.
 - `voices/`: saved voice metadata and copied references; back it up and do not bulk-delete it as cache.
+- `examples/voices/`: published synthetic example assets, not user storage; do not put private recordings here.
 
 On the tested machine, `.venv` uses 5.25 GiB and the Hugging Face cache uses 4.62 GiB before generated audio. These values are examples, not fixed limits.
 

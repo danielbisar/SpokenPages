@@ -22,6 +22,7 @@ The CUDA 12.6 environment intentionally pins PyTorch 2.14 and Torchaudio 2.11 be
 
 - `app.py` owns Tk widgets, UI validation, and the single background generation worker. Keep Tk updates on the UI thread through the event queue.
 - `core.py` owns EPUB parsing, bounded text splitting, model reuse, job identity, segment resume, and WAV assembly. Preserve spine order and text content; each synthesis passage must remain at most 400 characters.
+- Bump `CACHE_VERSION` for incompatible splitter, prompt, synthesis-dependency, or audio/cache changes. Keep `MODEL_REVISION` in both the actual snapshot loader and manifest identity; do not pass an unsupported revision argument through VoxCPM's constructor.
 - Book generation requires a saved reference WAV; voice previews may use description-only voice design.
 - Resume identity includes selected indices and full chapter text, voice style, reference-content hash, language, inference steps, seed, model, CFG, and preview mode. Any semantic setting change must produce a different job identity.
 - Stop is cooperative between passages. Valid completed segments must remain reusable after stop or failure.
@@ -32,13 +33,14 @@ The CUDA 12.6 environment intentionally pins PyTorch 2.14 and Torchaudio 2.11 be
 
 - The current UI is Windows-specific (`os.startfile`, `.cmd`/PowerShell entry points, and Windows Triton). Treat Linux support as a portability feature requiring code, dependency, documentation, and GPU validation changes.
 - `audiobooks/` is ignored runtime output. Its manifests contain full selected book text. Do not inspect, delete, stage, or rewrite user output unless explicitly requested.
-- `voices/` is tracked project data, not disposable cache. `voices/*.wav` uses Git LFS; review metadata and recording rights before adding or changing a reference.
+- `voices/` is ignored user data, not disposable cache. Never inspect or mutate an existing user library unless requested. Published synthetic examples live under `examples/voices/` and use Git LFS; keep their provenance and asset terms with them. Runtime saves must not modify published examples.
 - `.venv/`, Python caches, and the Hugging Face model cache are local generated data.
 - If SpokenPages is actively generating, source edits affect the next launch. Do not mutate the active job folder or voice library during that run.
 
 ## Validation and documentation
 
 - Run the narrowest relevant test first, then the full `.\run-tests.ps1` suite for shared generation, voice, or UI behavior.
+- Offline-only tests need just Python 3.12 with Tk: `py -3.12 -m unittest discover -s tests -v`. Windows CI requires Tk and must not silently skip desktop tests or install synthesis dependencies.
 - UI tests skip when Tcl/Tk cannot initialize; that skip does not validate desktop behavior.
 - Tests do not validate CUDA kernels, pronunciation, perceived quality, model downloads, or VRAM usage. State clearly when those checks were not run.
 - Update README workflow text and the linked architecture or troubleshooting guide when behavior, persisted data, dependency pins, or platform support changes.

@@ -2,3 +2,6 @@
 __pycache__/
 ignore
 audiobooks/
+/voices/
+.env
+.env.*

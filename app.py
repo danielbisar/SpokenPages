@@ -1,7 +1,9 @@
 """SpokenPages native Windows desktop interface."""
 import os
 import queue
+import sys
 import threading
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 import tkinter as tk
 from pathlib import Path
@@ -29,7 +31,7 @@ class App:
         style.configure('TLabel', font=('Segoe UI', 11))
         style.configure('TButton', padding=7, font=('Segoe UI', 10))
         base = Path(__file__).resolve().parent
-        self.library = VoiceLibrary(base / 'voices')
+        self.library = VoiceLibrary(base / 'voices', examples=base / 'examples' / 'voices')
         self.inputs = []
         self.reference = tk.StringVar()
         self.voice_style = tk.StringVar(value='Calm, clear audiobook narrator, measured pace')
@@ -359,6 +361,7 @@ class App:
                     if files:
                         self.events.put(('preview', str(files[0]), 0))
             except Exception as error:
+                traceback.print_exc(file=sys.stderr)
                 self.events.put(('error', str(error), 0))
             finally:
                 self.events.put(('done', '', 0))

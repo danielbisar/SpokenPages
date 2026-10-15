@@ -1,11 +1,28 @@
 """Named voice settings and durable copies of reference audio."""
 import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 
 
+def atomic_write(path, data):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=path.name + '.',
+                                         suffix='.tmp', delete=False) as output:
+            temporary = Path(output.name)
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 class VoiceLibrary:
-    def __init__(self, folder):
+    def __init__(self, folder, examples=None):
         self.folder = Path(folder)
         self.path = self.folder / 'voices.json'
         self.voices = {}
@@ -16,6 +33,10 @@ class VoiceLibrary:
             for name, voice in data.items():
                 self.validate(name, voice)
             self.voices = data
+        elif examples is not None:
+            sample = VoiceLibrary(examples)
+            for name in sample.voices:
+                self.save(name, sample.get(name))
 
     @staticmethod
     def validate(name, voice):
@@ -37,18 +58,18 @@ class VoiceLibrary:
         self.folder.mkdir(parents=True, exist_ok=True)
         if saved['reference']:
             audio = Path(saved['reference']).read_bytes()
+            if audio.startswith(b'version https://git-lfs.github.com/spec/v1'):
+                raise ValueError('Reference audio is a Git LFS pointer. Run git lfs install and git lfs pull first.')
             filename = hashlib.sha256(audio).hexdigest() + '.wav'
             reference = self.folder / filename
-            if not reference.exists():
-                reference.write_bytes(audio)
+            if not reference.exists() or hashlib.sha256(reference.read_bytes()).hexdigest() != filename[:-4]:
+                atomic_write(reference, audio)
             saved['reference'] = filename
         updated = dict(self.voices)
         if previous:
             del updated[previous]
         updated[name] = saved
-        temporary = self.path.with_suffix('.tmp')
-        temporary.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding='utf-8')
-        temporary.replace(self.path)
+        atomic_write(self.path, json.dumps(updated, ensure_ascii=False, indent=2).encode('utf-8'))
         self.voices = updated
         return name
 
