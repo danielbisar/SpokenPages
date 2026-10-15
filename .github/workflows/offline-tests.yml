@@ -1,0 +1,36 @@
+name: Windows offline tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      SPOKENPAGES_REQUIRE_TK: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify imports and a working Tk desktop
+        run: |
+          python -c "import app, core, voices, tkinter; root = tkinter.Tk(); root.withdraw(); root.update(); root.destroy(); print('Application imports and Tk passed; no synthesis dependencies installed.')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run offline unit and UI tests
+        run: python -m unittest discover -s tests -v
+      - name: Check patch whitespace
+        run: git diff --check HEAD^ HEAD

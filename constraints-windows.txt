@@ -1,0 +1,5 @@
+# Known-good direct GPU stack, not a complete transitive lock.
+torch==2.14.0
+torchaudio==2.11.0
+voxcpm==2.0.3
+triton-windows==3.8.0.post28; sys_platform == "win32"

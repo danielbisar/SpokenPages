@@ -2,6 +2,7 @@
 import argparse
 import time
 import torch
+from core import model_snapshot
 
 
 def main():
@@ -25,7 +26,7 @@ def main():
         return
     from voxcpm import VoxCPM
     started = time.perf_counter()
-    model = VoxCPM.from_pretrained('openbmb/VoxCPM2', load_denoiser=False,
+    model = VoxCPM.from_pretrained(model_snapshot(local_files_only=True), load_denoiser=False,
                                    local_files_only=True, optimize=args.compile)
     torch.cuda.synchronize()
     print(f'Model preparation: {time.perf_counter() - started:.2f}s', flush=True)

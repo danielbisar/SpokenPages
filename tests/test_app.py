@@ -1,4 +1,5 @@
 """UI integration checks; skipped if Tcl/Tk cannot initialize."""
+import os
 import tempfile
 import tkinter as tk
 import unittest
@@ -14,6 +15,8 @@ class AppTests(unittest.TestCase):
         try:
             self.root = tk.Tk()
         except tk.TclError as error:
+            if os.environ.get('SPOKENPAGES_REQUIRE_TK') == '1':
+                raise
             self.skipTest(str(error))
         self.root.withdraw()
         self.addCleanup(self.root.destroy)
@@ -78,3 +81,16 @@ class AppTests(unittest.TestCase):
         self.assertFalse(a.busy)
         a.clear_selection()
         self.assertIn('0 of 1 sections', a.selection_summary.cget('text'))
+
+    def test_worker_failure_retains_traceback_and_restores_inputs(self):
+        a = self.app
+        with patch('app.generate', side_effect=RuntimeError('Synthesis failed')), \
+                patch.object(a.executor, 'submit', side_effect=lambda work: work()), \
+                patch('app.traceback.print_exc') as traceback, \
+                patch('app.messagebox.showerror') as showerror:
+            a.start(True)
+            a.poll()
+        traceback.assert_called_once()
+        self.assertIn('Synthesis failed', showerror.call_args.args[1])
+        self.assertFalse(a.busy)
+        self.assertEqual(str(a.voice_selector.cget('state')), 'readonly')

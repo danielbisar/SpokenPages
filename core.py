@@ -13,6 +13,12 @@ from urllib.parse import unquote
 from xml.etree import ElementTree as ET
 
 
+# Bump when passage splitting, prompting, or audio/cache semantics change.
+CACHE_VERSION = 2
+MODEL_ID = 'openbmb/VoxCPM2'
+MODEL_REVISION = '32279effe8c19989596f05d353d1447f51d9e915'
+
+
 @dataclass
 class Chapter:
     title: str
@@ -79,6 +85,8 @@ def read_epub(path, include_language=False):
 
 def split_text(text, limit=400):
     """Bound inference input without dropping text, including unspaced scripts."""
+    if type(limit) is not int or limit < 1:
+        raise ValueError('Passage limit must be a positive integer.')
     chunks = []
     for paragraph in text.split('\n\n'):
         remaining = paragraph.strip()
@@ -87,13 +95,30 @@ def split_text(text, limit=400):
                 chunks.append(remaining)
                 break
             window = remaining[:limit + 1]
-            stops = list(re.finditer(r'[.!?。！？](?:\s|$)', window))
+            stops = list(re.finditer(r'[.!?。！？](?=\s)', window))
             cut = stops[-1].end() if stops else window.rfind(' ')
-            if cut < limit // 3:
+            if cut < max(1, limit // 3):
                 cut = limit
             chunks.append(remaining[:cut].strip())
             remaining = remaining[cut:].strip()
     return chunks
+
+
+def validate_wav(path):
+    """Check declared PCM frames against readable payload using bounded memory."""
+    try:
+        with wave.open(str(path), 'rb') as audio:
+            remaining = audio.getnframes()
+            if remaining <= 0:
+                raise ValueError('WAV contains no audio frames.')
+            frame_size = audio.getnchannels() * audio.getsampwidth()
+            while remaining:
+                count = min(remaining, 65536)
+                if len(audio.readframes(count)) != count * frame_size:
+                    raise ValueError('WAV audio payload is truncated.')
+                remaining -= count
+    except (wave.Error, EOFError) as error:
+        raise ValueError(f'Invalid PCM WAV: {path}') from error
 
 
 def join_wavs(inputs, output, gap_seconds=0.25):
@@ -125,20 +150,29 @@ def narration_prompt(text, style, language=''):
     return f'({direction}){text}' if direction else text
 
 
+def model_snapshot(local_files_only=False):
+    from huggingface_hub import snapshot_download
+    return snapshot_download(repo_id=MODEL_ID, revision=MODEL_REVISION,
+                             local_files_only=local_files_only)
+
+
 @lru_cache(maxsize=1)
 def load_model():
-    """Keep weights and compiled kernels alive between sequential UI jobs."""
+    """Keep pinned weights and compiled kernels alive between sequential UI jobs."""
     from voxcpm import VoxCPM
-    return VoxCPM.from_pretrained('openbmb/VoxCPM2', load_denoiser=False)
+    return VoxCPM.from_pretrained(model_snapshot(), load_denoiser=False)
 
 
 def generate(chapters, destination, reference, style, stop, report, preview=False,
              language='', steps=20, seed=42):
     if not preview and not reference:
         raise ValueError('Book generation needs a voice reference. Generate a voice test, use it as the reference, and save the voice first.')
+    if preview and (len(chapters) != 1 or not 1 <= len(chapters[0][1].text.strip()) <= 400):
+        raise ValueError('Voice preview needs one text between 1 and 400 characters.')
     import soundfile as sf
     import torch
-    config = {'model': 'openbmb/VoxCPM2', 'style': style, 'seed': seed, 'steps': steps, 'language': language, 'cfg': 2.0,
+    config = {'cache_version': CACHE_VERSION, 'model': MODEL_ID, 'model_revision': MODEL_REVISION,
+              'style': style, 'seed': seed, 'steps': steps, 'language': language, 'cfg': 2.0,
               'reference': hashlib.sha256(Path(reference).read_bytes()).hexdigest() if reference else None,
               'chapters': [(i, c.title, c.text) for i, c in chapters], 'preview': preview}
     key = hashlib.sha256(json.dumps(config, ensure_ascii=False).encode()).hexdigest()[:16]
@@ -148,9 +182,7 @@ def generate(chapters, destination, reference, style, stop, report, preview=Fals
     (folder / 'manifest.json').write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
     report('Preparing passages…', 0)
     model = None
-    tasks = [(i, c, split_text(c.text)) for i, c in chapters]
-    if preview:
-        tasks = [(tasks[0][0], tasks[0][1], tasks[0][2][:1])]
+    tasks = [(i, c, [c.text.strip()] if preview else split_text(c.text)) for i, c in chapters]
     total = sum(len(parts) for _, _, parts in tasks)
     done = 0
     for chapter_index, chapter, parts in tasks:
@@ -163,10 +195,10 @@ def generate(chapters, destination, reference, style, stop, report, preview=Fals
             valid = False
             if output.exists():
                 try:
-                    with wave.open(str(output), 'rb') as audio:
-                        valid = audio.getnframes() > 0
-                except (wave.Error, EOFError):
-                    pass
+                    validate_wav(output)
+                    valid = True
+                except ValueError as error:
+                    report(f'Regenerating invalid cached passage: {error}', done / total)
             if not valid:
                 if model is None:
                     report('Loading / preparing VoxCPM2. First compilation can take several minutes…', done / total)
@@ -185,6 +217,7 @@ def generate(chapters, destination, reference, style, stop, report, preview=Fals
                     raise ValueError('VoxCPM returned empty audio. Try a shorter passage.')
                 temporary = output.with_suffix('.partial.wav')
                 sf.write(str(temporary), wav, model.tts_model.sample_rate, subtype='PCM_16')
+                validate_wav(temporary)
                 temporary.replace(output)
             paths.append(output)
             done += 1
